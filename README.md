@@ -1,6 +1,6 @@
 <div align="center">
 
-# Luyun-Artifact-Vision (麓云文物智眸)
+# Luyun-Artifact-Vision (鲁韵文物智眸)
 
 ### 基于 YOLOv8 的文物图像细粒度分类与识别系统
 **[ YOLOv8 | PyTorch | Albumentations | Tkinter ]**
