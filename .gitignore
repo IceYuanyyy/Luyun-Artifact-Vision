@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and Models
+datasets/
+runs/
+models/*.onnx
+!models/.gitkeep
+
+# Environment
+.env
+.venv
+env/
+venv/
