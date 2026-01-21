@@ -85,6 +85,10 @@ def remove_watermark(img):
         print(f"Watermark removal error: {e}")
         return img
 
+import json
+
+# ... (Previous imports)
+
 def process():
     # 1. Clean old data
     if os.path.exists(OUTPUT_DIR):
@@ -100,6 +104,8 @@ def process():
     
     print(f"🚀 Starting processing. Found {len(categories)} main categories.")
 
+    id_to_name_map = {}  # Store ID -> Name mapping
+
     for cat in categories:
         cat_path = os.path.join(SOURCE_DIR, cat)
         # Traverse specific artifact folders (e.g., Era_Name_ShortID)
@@ -107,14 +113,24 @@ def process():
         
         for art in artifacts:
             # Extract ShortID as class name (e.g., 89f8c3)
-            # Assumption: Folder format is Era_Name_ShortID
+            # Folder format assumption: Era_Name_ShortID
+            parts = art.split('_')
             try:
-                class_name = art.split('_')[-1] 
+                class_name = parts[-1] 
+                # Extract real name (Middle part or full string minus ID)
+                if len(parts) >= 3:
+                     real_name = parts[1] # Era_Name_ID -> Name
+                else:
+                     real_name = art # Fallback
             except:
                 class_name = art # Fallback
+                real_name = art
+
+            id_to_name_map[class_name] = real_name # Save mapping
             
             src_art_path = os.path.join(cat_path, art)
             
+            # ... (Rest of processing) ...
             # Collect original images
             images = [f for f in os.listdir(src_art_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
             if not images:
@@ -126,13 +142,13 @@ def process():
             os.makedirs(train_dir, exist_ok=True)
             os.makedirs(val_dir, exist_ok=True)
 
-            print(f"Processing: {art} -> ID: {class_name} (Original: {len(images)} images)")
+            print(f"Processing: {art} -> ID: {class_name} (Name: {real_name})")
 
             # --- Augment and Distribute ---
             generated_count = 0
             
             while generated_count < TARGET_COUNT:
-                # Pick an image (start with sequential, then random)
+                # ... (Same loop logic) ...
                 if generated_count < len(images):
                     chosen_file = images[generated_count]
                     is_original = True
@@ -145,7 +161,7 @@ def process():
                 img = cv2_imread(img_path)
                 
                 if img is None:
-                    print(f"Warning: Could not read image {img_path}")
+                    # ... (Error handling) ...
                     if chosen_file in images:
                         images.remove(chosen_file) 
                     if not images: break
@@ -183,6 +199,11 @@ def process():
                 cv2_imwrite(save_path, save_img)
                 generated_count += 1
 
+    # Save Mapping
+    mapping_path = os.path.join("datasets", "id_to_name.json")
+    with open(mapping_path, 'w', encoding='utf-8') as f:
+        json.dump(id_to_name_map, f, ensure_ascii=False, indent=2)
+    print(f"✅ Mapping saved to {mapping_path}")
     print("✅ Data processing complete! Ready for training.")
 
 if __name__ == "__main__":
