@@ -12,6 +12,7 @@ inference_gui.py
 """
 
 import os
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
@@ -68,11 +69,55 @@ class ModernTheme:
     FONT_MONO = ("Consolas", 10)
 
 
+class ScrollableFrame(ttk.Frame):
+    """可滚动的Frame容器"""
+    def __init__(self, container, *args, **kwargs):
+        super().__init__(container, *args, **kwargs)
+        
+        # 创建画布和滚动条
+        self.canvas = tk.Canvas(self, bg=ModernTheme.BG_CARD, highlightthickness=0)
+        self.v_scroll = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.h_scroll = ttk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
+        
+        # 内部可滚动区域
+        self.scrollable_frame = tk.Frame(self.canvas, bg=ModernTheme.BG_CARD)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        
+        # 不直接pack scrollable_frame，而是创建window
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        
+        # 布局画布和滚动条
+        self.canvas.configure(yscrollcommand=self.v_scroll.set, xscrollcommand=self.h_scroll.set)
+        
+        self.v_scroll.pack(side="right", fill="y")
+        self.h_scroll.pack(side="bottom", fill="x")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        
+        # 绑定鼠标滚轮
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        
+        # 自动调整宽度
+        self.canvas.bind('<Configure>', self._on_canvas_configure)
+
+    def _on_canvas_configure(self, event):
+        # 让内部frame宽度跟随canvas宽度，但设置最小宽度以触发水平滚动
+        min_width = 450
+        width = max(event.width, min_width)
+        self.canvas.itemconfig(self.canvas_window, width=width)
+
+    def _on_mousewheel(self, event):
+        # 简单的鼠标滚轮滚动
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
 class InferenceApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Luyun Artifact Vision - 文物智能识别系统")
-        self.root.geometry("1150x720")
+        self.root.geometry("1250x750")
         self.root.minsize(900, 600)
         self.root.configure(bg=ModernTheme.BG_DARK)
         
@@ -300,12 +345,10 @@ class InferenceApp:
         self.image_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.image_listbox.bind("<<ListboxSelect>>", self._on_image_selected)
         
-        scrollbar = tk.Scrollbar(
+        scrollbar = ttk.Scrollbar(
             list_container,
-            command=self.image_listbox.yview,
-            bg=ModernTheme.BG_HOVER,
-            troughcolor=ModernTheme.BG_DARK,
-            width=8
+            orient="vertical",
+            command=self.image_listbox.yview
         )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.image_listbox.config(yscrollcommand=scrollbar.set)
@@ -404,12 +447,15 @@ class InferenceApp:
                   command=self._batch_inference).pack(side=tk.LEFT)
         
         # 右侧面板 - 识别结果
-        right_panel = self._create_card(main_container, "📋 识别结果", width=280)
+        right_panel = self._create_card(main_container, "📋 识别结果", width=350)
         right_panel.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # 结果显示
-        self.result_container = tk.Frame(right_panel, bg=ModernTheme.BG_CARD)
-        self.result_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        # 结果显示 - 使用 ScrollableFrame
+        self.result_scroll_frame = ScrollableFrame(right_panel)
+        self.result_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
+        
+        # 实际的内容容器是 scrollable_frame
+        self.result_container = self.result_scroll_frame.scrollable_frame
         
         # 占位提示
         self.result_placeholder = tk.Label(
@@ -420,7 +466,7 @@ class InferenceApp:
             fg=ModernTheme.TEXT_MUTED,
             justify="center"
         )
-        self.result_placeholder.pack(expand=True)
+        self.result_placeholder.pack(pady=50)
         
         # 结果列表容器
         self.result_list_frame = tk.Frame(self.result_container, bg=ModernTheme.BG_CARD)
@@ -541,23 +587,48 @@ class InferenceApp:
             self._load_model_from_path(path)
 
     def _load_model_from_path(self, path):
-        """加载模型"""
+        """异步加载模型"""
+        self.model_status.config(fg=ModernTheme.WARNING)
+        self.model_info_label.config(text=f"正在加载模型: {os.path.basename(path)}...")
+        self._update_status("正在加载模型，请稍候...")
+        self.model_combo.config(state="disabled")
+        self.root.update()
+        
+        # 启动后台线程加载模型
+        threading.Thread(target=self._load_model_task, args=(path,), daemon=True).start()
+
+    def _load_model_task(self, path):
+        """后台加载模型任务"""
         try:
-            self.model_status.config(fg=ModernTheme.WARNING)
-            self.root.update()
-            
             if path.endswith('.onnx'):
-                self.model = YOLO(path, task='classify')
+                model = YOLO(path, task='classify')
             else:
-                self.model = YOLO(path)
-            
+                model = YOLO(path)
+            # 加载完成，在主线程更新UI
+            self.root.after(0, self._on_model_loaded, model, path, None)
+        except Exception as e:
+            # 加载失败，在主线程显示错误
+            self.root.after(0, self._on_model_loaded, None, path, str(e))
+
+    def _on_model_loaded(self, model, path, error):
+        """模型加载回调"""
+        self.model_combo.config(state="readonly")
+        
+        if model:
+            self.model = model
             self.model_status.config(fg=ModernTheme.SUCCESS)
             self.model_info_label.config(text=f"模型: {os.path.basename(path)}")
-            self._update_status(f"模型加载成功")
-        except Exception as e:
+            self._update_status("模型加载成功")
+            
+            # 如果开启了自动识别且当前有图片，尝试识别
+            if self.auto_recognize.get() and self.image_list and self.current_index >= 0:
+                self._run_inference()
+        else:
             self.model = None
             self.model_status.config(fg=ModernTheme.ERROR)
-            messagebox.showerror("加载失败", f"无法加载模型:\n{e}")
+            self.model_info_label.config(text="模型加载失败")
+            self._update_status("模型加载失败")
+            messagebox.showerror("加载失败", f"无法加载模型:\n{error}")
 
     def _add_images(self):
         """添加图片"""
@@ -600,6 +671,9 @@ class InferenceApp:
                     self.image_list.append(path)
                     self.image_listbox.insert(tk.END, os.path.basename(path))
                     added += 1
+                    # 每添加10张图片更新一次UI，防止完全卡死
+                    if added % 10 == 0:
+                        self.root.update()
         
         if added > 0:
             self._update_nav_label()
@@ -672,7 +746,7 @@ class InferenceApp:
         for widget in self.result_list_frame.winfo_children():
             widget.destroy()
         self.result_list_frame.pack_forget()
-        self.result_placeholder.pack(expand=True)
+        self.result_placeholder.pack(pady=50)
 
     def _update_nav_label(self):
         """更新导航"""
@@ -707,7 +781,7 @@ class InferenceApp:
                 self._run_inference()
 
     def _run_inference(self):
-        """运行推理"""
+        """异步运行推理"""
         if self.model is None:
             messagebox.showwarning("提示", "请先选择模型!")
             return
@@ -715,11 +789,36 @@ class InferenceApp:
             messagebox.showwarning("提示", "请先选择图片!")
             return
         
-        try:
-            self._update_status("识别中...")
-            self.root.update()
+        # 防止重复点击
+        if getattr(self, '_is_inferencing', False):
+            return
             
-            results = self.model(self.image_path)
+        self._is_inferencing = True
+        self._update_status("正在识别...")
+        
+        # 启动后台线程进行推理
+        threading.Thread(target=self._run_inference_task, args=(self.image_path,), daemon=True).start()
+
+    def _run_inference_task(self, image_path):
+        """后台推理任务"""
+        try:
+            results = self.model(image_path)
+            # 在主线程处理结果
+            self.root.after(0, self._on_inference_complete, results, None)
+        except Exception as e:
+            # 在主线程显示错误
+            self.root.after(0, self._on_inference_complete, None, str(e))
+
+    def _on_inference_complete(self, results, error):
+        """推理完成回调"""
+        self._is_inferencing = False
+        
+        if error:
+            self._update_status("识别失败")
+            messagebox.showerror("识别失败", f"推理出错: {error}")
+            return
+            
+        try:
             probs = results[0].probs
             top5_indices = probs.top5
             top5_confs = probs.top5conf
@@ -766,7 +865,9 @@ class InferenceApp:
                     font=ModernTheme.FONT_BODY,
                     bg=ModernTheme.BG_DARK,
                     fg=ModernTheme.TEXT_PRIMARY,
-                    anchor="w"
+                    anchor="w",
+                    wraplength=400,  # 允许更长的换行
+                    justify="left"
                 ).pack(fill=tk.X)
                 
                 if real_name != class_id:
@@ -792,8 +893,8 @@ class InferenceApp:
             self._update_status("识别完成")
             
         except Exception as e:
-            self._update_status("识别失败")
-            messagebox.showerror("识别失败", f"推理出错: {e}")
+            self._update_status("处理结果出错")
+            messagebox.showerror("错误", f"处理结果失败: {e}")
 
     def _batch_inference(self):
         """批量识别"""
