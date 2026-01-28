@@ -25,7 +25,7 @@
 | 🧹 **智能清洗** | 自动提取文物 ShortID，集成去水印算法 (Inpainting) 净化原始数据 |
 | 🔄 **数据增强** | 基于 Albumentations 的 20x 数据扩充（旋转、噪点、透视变换），解决小样本问题 |
 | 🎯 **高精识别** | 采用 YOLOv8-Cls 模型，Top-1 准确率高达 **99.8%**，Top-5 准确率 100% |
-| 🖥️ **可视化交互** | 提供 Tkinter 桌面级 GUI，支持中文名称显示，Top-5 实时预测 |
+| 🎨 **全新 GUI v2.0** | 现代化深色主题界面，支持**拖放识别**、**批量处理**、**自动检索模型**、快捷键操作 |
 | 📦 **部署友好** | 支持一键导出 ONNX 通用格式，便于 Spring Boot 或移动端集成 |
 
 ---
@@ -82,6 +82,9 @@ conda env create -f environment.yml
 
 # 激活环境
 conda activate luyun-cv
+
+# 安装 GUI 拖放支持 (可选)
+pip install tkinterdnd2
 ```
 
 ### 2️⃣ 数据准备
