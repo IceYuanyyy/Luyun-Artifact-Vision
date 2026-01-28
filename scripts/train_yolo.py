@@ -17,8 +17,8 @@ import os
 def train():
     # 1. Configuration
     DATASET_DIR = "datasets/processed"
-    MODEL_NAME = "yolov8n-cls.pt"  # Nano model for speed
-    EPOCHS = 50
+    MODEL_NAME = "yolov8s-cls.pt"  # Small model for better fine-grained recognition
+    EPOCHS = 100  # 细粒度分类需要更长训练时间
     IMG_SIZE = 224
     BATCH_SIZE = 16
     PROJECT_NAME = "Luyun-Artifact-Vision"

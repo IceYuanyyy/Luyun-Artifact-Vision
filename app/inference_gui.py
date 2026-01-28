@@ -41,10 +41,20 @@ class InferenceApp:
     def _load_id_mapping(self):
         try:
             import json
-            mapping_path = os.path.join("datasets", "id_to_name.json")
+            # 获取项目根目录（app 目录的父目录）
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
+            mapping_path = os.path.join(project_root, "datasets", "id_to_name.json")
+            
+            print(f"[DEBUG] Loading mapping from: {mapping_path}")
+            
             if os.path.exists(mapping_path):
                 with open(mapping_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    print(f"[DEBUG] Loaded {len(data)} mappings")
+                    return data
+            else:
+                print(f"[DEBUG] Mapping file not found at: {mapping_path}")
             return {}
         except Exception as e:
             print(f"Mapping load error: {e}")
@@ -89,7 +99,77 @@ class InferenceApp:
         ttk.Button(bottom_frame, text="开始识别", command=self._run_inference).pack(side=tk.LEFT, padx=10)
         ttk.Button(bottom_frame, text="清空", command=self._clear).pack(side=tk.RIGHT, padx=10)
 
-    # ... (Other methods) ...
+
+    def _browse_model(self):
+        """打开文件对话框选择模型文件"""
+        path = filedialog.askopenfilename(
+            title="选择模型文件",
+            filetypes=[("YOLO 模型", "*.pt *.onnx"), ("所有文件", "*.*")]
+        )
+        if path:
+            self.model_entry.delete(0, tk.END)
+            self.model_entry.insert(0, path)
+            self._load_model_from_path(path)
+    
+    def _load_model(self):
+        """从输入框路径加载模型，或弹出文件对话框"""
+        path = self.model_entry.get().strip()
+        if path and os.path.exists(path):
+            self._load_model_from_path(path)
+        else:
+            self._browse_model()
+    
+    def _load_model_from_path(self, path):
+        """实际加载模型"""
+        try:
+            self.model_status.config(text="加载中...", foreground="orange")
+            self.root.update()
+            
+            # ONNX 模型需要显式指定任务类型
+            if path.endswith('.onnx'):
+                self.model = YOLO(path, task='classify')
+            else:
+                self.model = YOLO(path)
+            
+            self.model_status.config(text=f"已加载: {os.path.basename(path)}", foreground="green")
+        except Exception as e:
+            self.model = None
+            self.model_status.config(text="加载失败", foreground="red")
+            messagebox.showerror("加载失败", f"无法加载模型:\n{e}")
+    
+    def _select_image(self):
+        """选择要识别的图片"""
+        path = filedialog.askopenfilename(
+            title="选择图片",
+            filetypes=[("图像文件", "*.jpg *.jpeg *.png *.bmp *.webp"), ("所有文件", "*.*")]
+        )
+        if path:
+            self.image_path = path
+            self._display_image(path)
+    
+    def _display_image(self, path):
+        """在界面中显示图片"""
+        try:
+            img = Image.open(path)
+            
+            # 智能缩放以适应显示区域
+            max_w, max_h = 500, 500
+            img_ratio = img.width / img.height
+            
+            new_w = min(img.width, max_w)
+            new_h = int(new_w / img_ratio)
+            
+            if new_h > max_h:
+                new_h = max_h
+                new_w = int(new_h * img_ratio)
+            
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            photo = ImageTk.PhotoImage(img)
+            self.image_label.config(image=photo, text="")
+            self.image_label.image = photo  # 保持引用
+        except Exception as e:
+            messagebox.showerror("图片加载失败", f"无法打开图片:\n{e}")
 
     def _run_inference(self):
         if self.model is None:
@@ -119,12 +199,18 @@ class InferenceApp:
                 class_id = names[idx]
                 conf_pct = float(conf) * 100
                 
-                # Retrieve Real Name from Mapping
-                real_name = self.id_to_name.get(class_id, class_id)
+                # 去除可能的前缀 "__" 或 "_"，用于 ID 查找
+                clean_id = class_id.lstrip('_')
                 
-                self.result_text.insert(tk.END, f"{i+1}. {real_name}\n")
-                if real_name != class_id:
-                     self.result_text.insert(tk.END, f"   (ID: {class_id})\n")
+                # 从映射中获取中文名称
+                real_name = self.id_to_name.get(clean_id, None)
+                
+                if real_name:
+                    self.result_text.insert(tk.END, f"{i+1}. {real_name}\n")
+                    self.result_text.insert(tk.END, f"   (ID: {clean_id})\n")
+                else:
+                    self.result_text.insert(tk.END, f"{i+1}. {class_id}\n")
+                
                 self.result_text.insert(tk.END, f"   置信度: {conf_pct:.2f}%\n\n")
             
             self.result_text.config(state=tk.DISABLED)
